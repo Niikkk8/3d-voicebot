@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Mic, MicOff, X, User, Bot } from 'lucide-react';
 
-export const VoiceChat = ({ onStartTalking, onStopTalking, onClose }) => {
+export const VoiceChat = ({ 
+    onStartTalking, 
+    onStopTalking, 
+    onClose, 
+    documentContext,
+    apiUrl 
+}) => {
     const [isListening, setIsListening] = useState(false);
     const [transcript, setTranscript] = useState('');
     const recognitionRef = useRef(null);
     const [chatHistory, setChatHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const chatContainerRef = useRef(null);
-
-    const genAI = new GoogleGenerativeAI("AIzaSyAkkgoutn9SEYg939Pb21Zi19rBwD93_5M");
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
     useEffect(() => {
         if (chatContainerRef.current) {
@@ -58,36 +60,33 @@ export const VoiceChat = ({ onStartTalking, onStopTalking, onClose }) => {
             setIsLoading(true);
             onStartTalking();
 
-            // Add user message to chat history
             const userMessage = { type: "user", content: input };
             setChatHistory(prev => [...prev, userMessage]);
 
-            // Create chat with history
-            const chat = model.startChat({
-                history: chatHistory.map(msg => ({
-                    role: msg.type === "user" ? "user" : "model",
-                    parts: [{ text: msg.content }],
-                })),
-                generationConfig: {
-                    maxOutputTokens: 500,
+            const response = await fetch(`${apiUrl}/api/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
                 },
+                body: JSON.stringify({
+                    prompt: input,
+                    context: documentContext.text + '\n\nSummary:\n' + documentContext.summary
+                }),
             });
 
-            // Get response from Gemini
-            const result = await chat.sendMessage(input);
-            const response = await result.response;
-            const text = await response.text();
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to get response');
+            }
 
-            // Add bot message to chat history
-            const botMessage = { type: "bot", content: text };
+            const data = await response.json();
+            const botMessage = { type: "bot", content: data.response };
             setChatHistory(prev => [...prev, botMessage]);
 
-            // Speak the response
-            speakResponse(text);
+            speakResponse(data.response);
         } catch (error) {
             console.error('Error:', error);
             onStopTalking();
-            // Handle error response
             const errorMessage = "I encountered an error. Please try again.";
             speakResponse(errorMessage);
         } finally {
@@ -134,7 +133,6 @@ export const VoiceChat = ({ onStartTalking, onStopTalking, onClose }) => {
         }
     };
 
-    // Cleanup on unmount
     useEffect(() => {
         return () => {
             if (recognitionRef.current) {
@@ -146,7 +144,6 @@ export const VoiceChat = ({ onStartTalking, onStopTalking, onClose }) => {
 
     return (
         <div className="flex flex-col h-[500px]">
-            {/* Header */}
             <div className="flex justify-between items-center p-4 border-b">
                 <h2 className="text-lg font-semibold">Virtual Assistant</h2>
                 <button
@@ -157,11 +154,18 @@ export const VoiceChat = ({ onStartTalking, onStopTalking, onClose }) => {
                 </button>
             </div>
 
-            {/* Chat history */}
             <div
                 ref={chatContainerRef}
                 className="flex-1 overflow-y-auto p-4 space-y-4"
             >
+                {documentContext.text && (
+                    <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                        <p className="text-sm text-blue-800">
+                            Document loaded. You can ask questions about its content.
+                        </p>
+                    </div>
+                )}
+
                 {chatHistory.map((msg, index) => (
                     <div
                         key={index}
@@ -196,7 +200,6 @@ export const VoiceChat = ({ onStartTalking, onStopTalking, onClose }) => {
                 )}
             </div>
 
-            {/* Input area */}
             <div className="p-4 border-t bg-gray-50">
                 {transcript && (
                     <div className="mb-2 text-sm text-gray-600">
